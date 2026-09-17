@@ -85,19 +85,45 @@ Komoot, Apple Fitness и т. п.). OCR распознаёт текст на фо
 Бэкенд определяется автоматически при каждом запросе:
 
 1. **`vision`** — системный OCR macOS (Vision framework через pyobjc),
-   основной бэкенд на Mac; распознаёт `ru-RU`+`en-US` в режиме `accurate`.
-2. **`tesseract`** — если Vision недоступен (не macOS), но `tesseract`
-   найден в `PATH`: используется `pytesseract` (`lang="rus+eng"`).
-3. **`none`** — если недоступно ни то, ни другое: OCR не запускается, поля
-   формы остаются пустыми, а в ответе приходит `ocr_message` с подсказкой,
-   что установить. Значения в этом случае вводятся вручную на том же
-   экране подтверждения.
+   основной бэкенд на Mac, но только если он умеет распознавать русский
+   (см. ниже про macOS 12); в этом случае — `ru-RU`+`en-US` в режиме
+   `accurate`.
+2. **`tesseract`** — используется, если Vision недоступен (не macOS), либо
+   доступен, но не умеет распознавать русский, а `tesseract` найден в
+   `PATH`: `pytesseract` (`lang="rus+eng"`).
+3. **`vision` на английском** — если Vision не умеет русский и `tesseract`
+   не установлен: распознавание идёт на `en-US`, а в ответе приходит
+   `ocr_message` с подсказкой поставить tesseract — русский текст на фото
+   в этом случае будет распознан плохо или никак.
+4. **`none`** — если недоступно ничего: OCR не запускается, поля формы
+   остаются пустыми, а в ответе приходит `ocr_message` с подсказкой, что
+   установить. Значения в этом случае вводятся вручную на том же экране
+   подтверждения.
 
-Установка Tesseract (пакет `pytesseract` уже в `requirements.txt`):
+**macOS 12 и русский язык.** `VNRecognizeTextRequest` на macOS 12 умеет
+распознавать только `en`, `fr`, `it`, `de`, `es`, `pt`, `zh` — русского в
+списке нет (`ru-RU` появился в Vision начиная с macOS 13). Приложение
+проверяет это через `supportedRecognitionLanguagesAndReturnError_` и, если
+русского нет, а `tesseract` установлен — использует его вместо Vision.
+Кириллица, которую всё же пытается прочитать Vision без поддержки
+русского, распознаётся похожими по начертанию латинскими буквами и
+цифрами (например, «Расстояние» → `PacctoAHMe`, «км/ч» → `KM/4`, «уд/мин»
+→ `yA/MUH`); `photo_parse.normalize_transliteration()` умеет приводить
+такие известные варианты обратно к обычному виду перед разбором, но
+чистый Tesseract с `lang=rus+eng` даёт куда более надёжный результат — на
+macOS 12 рекомендуется установить его:
+
+```bash
+brew install tesseract tesseract-lang
+```
+
+Установка Tesseract на других платформах (пакет `pytesseract` уже в
+`requirements.txt`):
 
 - **Linux**: `sudo apt-get install tesseract-ocr tesseract-ocr-rus`
-- **Windows**: установщик [UB Mannheim tesseract-ocr](https://github.com/UB-Mannheim/tesseract/wiki),
-  затем добавить путь к `tesseract.exe` в `PATH`.
+- **Windows**: установщик [UB Mannheim tesseract-ocr](https://github.com/UB-Mannheim/tesseract/wiki)
+  (включает языковые пакеты, в том числе русский), затем добавить путь к
+  `tesseract.exe` в `PATH`.
 
 Vision (только macOS) требует системные пакеты pyobjc — в
 `requirements.txt` они закомментированы, так как не собираются вне macOS:
