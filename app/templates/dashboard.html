@@ -154,23 +154,67 @@
   .chart-box.small {
     height: 220px;
   }
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .topbar nav {
+    display: flex;
+    gap: 14px;
+    font-size: 14px;
+    padding-top: 4px;
+  }
+  .topbar nav a { color: var(--accent); text-decoration: none; }
+  .topbar nav a:hover { text-decoration: underline; }
+  table.history {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.history th,
+  table.history td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.history th {
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .table-scroll { overflow-x: auto; }
+  .delete-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid var(--warn);
+    color: var(--warn);
+  }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Дашборд тренировок</h1>
-  <p class="lead">Введите email и загрузите CSV с тренировками, чтобы увидеть график прогресса и рекомендацию.</p>
+  <div class="topbar">
+    <div>
+      <h1>Дашборд тренировок</h1>
+      <p class="lead">Загрузите CSV, GPX или FIT с тренировками, чтобы увидеть график прогресса и рекомендации.</p>
+    </div>
+    <nav>
+      <a href="{{ url_for('profile') }}">Профиль{% if user %} ({{ user.email }}){% endif %}</a>
+      <a href="{{ url_for('logout') }}">Выйти</a>
+    </nav>
+  </div>
 
   <div class="card">
     <form id="uploadForm">
       <div class="field">
-        <label for="userEmail">Email</label>
-        <input type="email" id="userEmail" name="user_email" required placeholder="you@example.com">
-      </div>
-      <div class="field">
-        <label for="csvFile">CSV с тренировками</label>
-        <input type="file" id="csvFile" name="file" accept=".csv" required>
+        <label for="csvFile">Файл с тренировками</label>
+        <input type="file" id="csvFile" name="file" accept=".csv,.gpx,.fit,.zip" required>
       </div>
       <button type="submit" id="submitBtn">Загрузить</button>
     </form>
@@ -217,6 +261,27 @@
     <h2>Рекомендации</h2>
     <div id="recommendationBox"></div>
   </div>
+
+  <div class="card" id="historyCard" hidden>
+    <h2>История тренировок</h2>
+    <div class="table-scroll">
+      <table class="history">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Км</th>
+            <th>Время, мин</th>
+            <th>Скорость, км/ч</th>
+            <th>Пульс</th>
+            <th>Набор высоты, м</th>
+            <th>Источник</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -233,6 +298,8 @@
   const weeklyCount = document.getElementById("weeklyCount");
   const weeklyChange = document.getElementById("weeklyChange");
   const hrZonesCard = document.getElementById("hrZonesCard");
+  const historyCard = document.getElementById("historyCard");
+  const historyBody = document.getElementById("historyBody");
   let chart = null;
   let hrZonesChart = null;
 
@@ -377,17 +444,79 @@
     recommendationCard.hidden = false;
   }
 
-  async function loadDashboard(userEmail) {
+  function fmt(value, digits) {
+    return value === null || value === undefined ? "—" : Number(value).toFixed(digits);
+  }
+
+  function renderHistory(workouts) {
+    historyBody.innerHTML = "";
+    if (!workouts.length) {
+      historyCard.hidden = true;
+      return;
+    }
+    historyCard.hidden = false;
+
+    const ordered = [...workouts].sort((a, b) => (a.date < b.date ? 1 : -1));
+    for (const w of ordered) {
+      const tr = document.createElement("tr");
+
+      const cells = [
+        w.date,
+        fmt(w.distance_km, 2),
+        fmt(w.duration_min, 0),
+        fmt(w.avg_speed_kmh, 1),
+        w.avg_hr === null || w.avg_hr === undefined ? "—" : Math.round(w.avg_hr),
+        w.elevation_gain_m === null || w.elevation_gain_m === undefined ? "—" : Math.round(w.elevation_gain_m),
+        w.source,
+      ];
+      for (const value of cells) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      }
+
+      const actionTd = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "delete-btn";
+      delBtn.textContent = "Удалить";
+      delBtn.addEventListener("click", () => deleteWorkout(w.id));
+      actionTd.appendChild(delBtn);
+      tr.appendChild(actionTd);
+
+      historyBody.appendChild(tr);
+    }
+  }
+
+  async function deleteWorkout(workoutId) {
+    try {
+      const res = await fetch(`/api/workouts/${workoutId}`, { method: "DELETE" });
+      if (!res.ok) {
+        showStatus("Не удалось удалить тренировку", "error");
+        return;
+      }
+      await loadDashboard();
+    } catch (err) {
+      showStatus("Не удалось удалить тренировку: " + err.message, "error");
+    }
+  }
+
+  async function loadDashboard() {
     const [workoutsRes, recRes] = await Promise.all([
-      fetch(`/api/workouts?user_email=${encodeURIComponent(userEmail)}`),
-      fetch(`/api/recommendations?user_email=${encodeURIComponent(userEmail)}`),
+      fetch("/api/workouts"),
+      fetch("/api/recommendations"),
     ]);
 
+    if (workoutsRes.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
     if (!workoutsRes.ok) {
       throw new Error("Не удалось загрузить тренировки");
     }
     const workouts = await workoutsRes.json();
     renderChart(workouts);
+    renderHistory(workouts);
 
     if (recRes.ok) {
       const data = await recRes.json();
@@ -402,12 +531,10 @@
     statusEl.hidden = true;
     submitBtn.disabled = true;
 
-    const userEmail = document.getElementById("userEmail").value.trim();
     const fileInput = document.getElementById("csvFile");
 
     try {
       const formData = new FormData();
-      formData.append("user_email", userEmail);
       formData.append("file", fileInput.files[0]);
 
       const uploadRes = await fetch("/api/workouts/upload", {
@@ -422,13 +549,16 @@
       }
 
       showStatus(`Загружено тренировок: ${uploadData.saved}`, "ok");
-      await loadDashboard(userEmail);
+      form.reset();
+      await loadDashboard();
     } catch (err) {
       showStatus("Не удалось обработать запрос: " + err.message, "error");
     } finally {
       submitBtn.disabled = false;
     }
   });
+
+  loadDashboard().catch((err) => showStatus("Не удалось загрузить дашборд: " + err.message, "error"));
 </script>
 </body>
 </html>
