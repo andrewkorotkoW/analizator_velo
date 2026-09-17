@@ -115,6 +115,29 @@ def test_upload_with_recognized_text_returns_parsed_fields(client, monkeypatch):
     assert data["confidence"] > 0
 
 
+def test_upload_ocr_backend_is_always_filled_even_when_vision_lacks_russian(client, monkeypatch):
+    """На macOS < 13 Vision не поддерживает ru-RU: recognize_text() тогда
+    возвращает backend='vision' на en-US и подсказку про tesseract в
+    message — ocr_backend в ответе не должен превращаться в None."""
+    register_and_login(client, "user@example.com")
+    monkeypatch.setattr(
+        main_module,
+        "recognize_text",
+        lambda content: {
+            "text": "Distance 42.3 km",
+            "backend": "vision",
+            "message": ocr_module.RUSSIAN_NOT_SUPPORTED_MESSAGE,
+        },
+    )
+    resp = upload_photo(client)
+    data = resp.get_json()
+    assert data["ocr_backend"] == "vision"
+    assert data["ocr_backend"] is not None
+    assert data["ocr_message"] == ocr_module.RUSSIAN_NOT_SUPPORTED_MESSAGE
+    assert "tesseract" in data["ocr_message"].lower()
+    assert data["fields"]["distance_km"] == pytest.approx(42.3)
+
+
 def test_upload_missing_photo_field_returns_400(client):
     register_and_login(client, "user@example.com")
     resp = client.post("/api/workouts/photo", data={}, content_type="multipart/form-data")

@@ -24,6 +24,12 @@ NO_OCR_MESSAGE = (
     "tesseract-lang или apt install tesseract-ocr tesseract-ocr-rus) и pip install pytesseract."
 )
 
+RUSSIAN_NOT_SUPPORTED_MESSAGE = (
+    "Русский не поддерживается этой версией macOS (Vision умеет только en, fr, it, de, es, "
+    "pt, zh) — распознавание выполнено на английском и может быть неточным. Установите "
+    "tesseract: brew install tesseract tesseract-lang"
+)
+
 
 def _vision_available() -> bool:
     try:
@@ -34,20 +40,43 @@ def _vision_available() -> bool:
     return True
 
 
+def _vision_supports_russian() -> bool:
+    """До macOS 13 VNRecognizeTextRequest не умеет распознавать русский —
+    supportedRecognitionLanguagesAndReturnError_ на таких системах возвращает
+    только en/fr/it/de/es/pt/zh, без 'ru-RU'."""
+    import Vision
+
+    request = Vision.VNRecognizeTextRequest.alloc().init()
+    request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+    languages, error = request.supportedRecognitionLanguagesAndReturnError_(None)
+    if error is not None or not languages:
+        return False
+    return "ru-RU" in list(languages)
+
+
 def _tesseract_available() -> bool:
     return shutil.which("tesseract") is not None
 
 
 def detect_backend() -> str:
-    """Определяет доступный бэкенд: 'vision', 'tesseract' или 'none'."""
-    if _vision_available():
+    """Определяет, каким бэкендом распознавать текст: 'vision', 'tesseract' или 'none'.
+
+    Vision предпочитается, только если он умеет распознавать русский. Если нет
+    (см. _vision_supports_russian), но доступен tesseract — предпочитаем его,
+    так как он распознаёт русский на любой версии macOS. Если и tesseract нет —
+    используем Vision на английском (recognize_text вернёт понятную подсказку).
+    """
+    vision_ok = _vision_available()
+    if vision_ok and _vision_supports_russian():
         return "vision"
     if _tesseract_available():
         return "tesseract"
+    if vision_ok:
+        return "vision"
     return "none"
 
 
-def _recognize_with_vision(image_bytes: bytes) -> str:
+def _recognize_with_vision(image_bytes: bytes, languages) -> str:
     import Quartz
     import Vision
     from Foundation import NSData
@@ -62,7 +91,7 @@ def _recognize_with_vision(image_bytes: bytes) -> str:
 
     request = Vision.VNRecognizeTextRequest.alloc().init()
     request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
-    request.setRecognitionLanguages_(["ru-RU", "en-US"])
+    request.setRecognitionLanguages_(list(languages))
     request.setUsesLanguageCorrection_(True)
 
     handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
@@ -99,7 +128,11 @@ def recognize_text(image_bytes: bytes, backend: Optional[str] = None) -> OcrResu
     backend = backend or detect_backend()
 
     if backend == "vision":
-        return {"text": _recognize_with_vision(image_bytes), "backend": "vision", "message": None}
+        ru_supported = _vision_supports_russian()
+        languages = ["ru-RU", "en-US"] if ru_supported else ["en-US"]
+        text = _recognize_with_vision(image_bytes, languages)
+        message = None if ru_supported else RUSSIAN_NOT_SUPPORTED_MESSAGE
+        return {"text": text, "backend": "vision", "message": message}
     if backend == "tesseract":
         return {"text": _recognize_with_tesseract(image_bytes), "backend": "tesseract", "message": None}
 

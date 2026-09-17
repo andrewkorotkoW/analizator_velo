@@ -148,3 +148,132 @@ def test_none_input_does_not_raise_and_returns_all_none():
 def test_calendar_invalid_date_is_rejected(text):
     result = parse_ocr_text(text)
     assert result["date"] is None
+
+
+# =====================================================================
+# Транслит: на macOS < 13 Vision не поддерживает ru-RU, и русский текст
+# распознаётся похожими по начертанию латинскими буквами/цифрами (см.
+# app.ocr.RUSSIAN_NOT_SUPPORTED_MESSAGE). normalize_transliteration()
+# должна вернуть все поля из такого текста, как если бы он был на обычной
+# кириллице.
+# =====================================================================
+
+
+def test_full_translit_vision_summary_screen_extracts_all_six_fields():
+    """Реальный вывод Vision для экрана с итогами заезда на macOS без
+    поддержки русского: кириллица заменена похожими латинскими буквами и
+    цифрами (PacctoAHMe=Расстояние, KM/4=км/ч, yA/MUH=уд/мин, Ha6op
+    BbICoTbl=Набор высоты, CeHTA6pa=сентября)."""
+    text = (
+        "Утренний заезд / 17 CeHTA6pa 2026 / PacctoAHMe / 42,3 KM / "
+        "Время в движении / 1:38:20 / Cpeдняя Ckopoctb / 25,8 KM/4 / "
+        "Средний nymbe / 146 yA/MUH / Ha6op BbICoTbl / 410 M"
+    )
+    result = parse_ocr_text(text)
+    assert result["date"] == "2026-09-17"
+    assert result["distance_km"] == pytest.approx(42.3)
+    assert result["duration_min"] == pytest.approx(98.33333333333333)
+    assert result["avg_speed_kmh"] == pytest.approx(25.8)
+    assert result["avg_hr"] == pytest.approx(146.0)
+    assert result["elevation_gain_m"] == pytest.approx(410.0)
+    assert result["confidence"] == 1.0
+
+
+def test_translit_speed_unit_km_slash_4_normalized_to_km_h():
+    result = parse_ocr_text("25,8 KM/4")
+    assert result["avg_speed_kmh"] == pytest.approx(25.8)
+    assert result["distance_km"] is None
+
+
+def test_translit_hr_unit_yA_MUH_normalized_to_bpm():
+    result = parse_ocr_text("146 yA/MUH")
+    assert result["avg_hr"] == pytest.approx(146.0)
+
+
+def test_translit_hr_unit_mixed_latin_y_cyrillic_normalized_to_bpm():
+    result = parse_ocr_text("146 yд/мин")
+    assert result["avg_hr"] == pytest.approx(146.0)
+
+
+def test_translit_elevation_label_Ha6op_BbICoTbl_recognized():
+    result = parse_ocr_text("Ha6op BbICoTbl 410 m")
+    assert result["elevation_gain_m"] == pytest.approx(410.0)
+
+
+def test_translit_month_recognized_for_other_months_when_evidenced_letters_match():
+    # Все буквы в "марта"/"августа" (м,а,р,т/а,в,г,у,с,т,а) входят в таблицу
+    # соответствий, поэтому и другие месяцы, не только сентябрь, распознаются.
+    result = parse_ocr_text("5 Mapta 2026")
+    assert result["date"] == "2026-03-05"
+
+
+def test_translit_normalization_does_not_affect_clean_cyrillic_text():
+    text = "Дистанция: 42,3 км\nСредняя скорость: 25,8 км/ч\nСредний пульс: 146 уд/мин\nНабор высоты: 410 м\n17 сентября 2026"
+    result = parse_ocr_text(text)
+    assert result["distance_km"] == pytest.approx(42.3)
+    assert result["avg_speed_kmh"] == pytest.approx(25.8)
+    assert result["avg_hr"] == pytest.approx(146.0)
+    assert result["elevation_gain_m"] == pytest.approx(410.0)
+    assert result["date"] == "2026-09-17"
+
+
+# =====================================================================
+# Разбор «подпись — значение на соседней строке» (типичная раскладка
+# экранов велокомпьютеров: заголовок, затем число без единицы измерения
+# рядом). Значение+единица на одной строке остаются приоритетным путём —
+# фолбэк применяется только для строк, где число нашлось не на этой же
+# строке, что подпись.
+# =====================================================================
+
+
+def test_garmin_wahoo_style_label_then_bare_value_on_next_line():
+    text = (
+        "Distance\n42.3\nAvg Speed\n25.8 km/h\nAvg HR\n142\n"
+        "Elevation Gain\n410 m\nTime\n1:38:20\nDate\n17.09.2026"
+    )
+    result = parse_ocr_text(text)
+    assert result["distance_km"] == pytest.approx(42.3)
+    assert result["avg_speed_kmh"] == pytest.approx(25.8)
+    assert result["avg_hr"] == pytest.approx(142.0)
+    assert result["elevation_gain_m"] == pytest.approx(410.0)
+    assert result["duration_min"] == pytest.approx(98.33333333333333)
+    assert result["date"] == "2026-09-17"
+    assert result["confidence"] == 1.0
+
+
+def test_label_then_bare_value_fallback_does_not_override_same_line_ambiguous_case():
+    # Регрессия для test_ambiguous_or_unrecognizable_fragment_stays_none_for_all_fields:
+    # подпись и число на ОДНОЙ строке без единицы измерения по-прежнему
+    # остаются недостоверными — додумывать нельзя, даже если рядом есть подпись.
+    result = parse_ocr_text("Дистанция 42.15")
+    assert result["distance_km"] is None
+
+
+def test_wahoo_style_all_fields_on_same_line_with_units_still_works():
+    text = (
+        "Ride Distance: 42.3 km | Elevation Gain: 410m | Avg Heart Rate: 142 bpm | "
+        "Avg Speed: 25.8km/h | Moving Time: 1:38:20"
+    )
+    result = parse_ocr_text(text)
+    assert result["distance_km"] == pytest.approx(42.3)
+    assert result["elevation_gain_m"] == pytest.approx(410.0)
+    assert result["avg_hr"] == pytest.approx(142.0)
+    assert result["avg_speed_kmh"] == pytest.approx(25.8)
+    assert result["duration_min"] == pytest.approx(98.33333333333333)
+
+
+def test_strava_style_russian_screen_via_tesseract_clean_cyrillic():
+    # Strava-скрин через tesseract: кириллица уже нормальная, транслит не нужен.
+    text = (
+        "Утренний заезд\n17 сентября 2026\nРасстояние\n42,3 км\n"
+        "Время в движении\n1:38:20\nСредняя скорость\n25,8 км/ч\n"
+        "Средний пульс\n146 уд/мин\nНабор высоты\n410 м"
+    )
+    result = parse_ocr_text(text)
+    assert result["date"] == "2026-09-17"
+    assert result["distance_km"] == pytest.approx(42.3)
+    assert result["duration_min"] == pytest.approx(98.33333333333333)
+    assert result["avg_speed_kmh"] == pytest.approx(25.8)
+    assert result["avg_hr"] == pytest.approx(146.0)
+    assert result["elevation_gain_m"] == pytest.approx(410.0)
+    assert result["confidence"] == 1.0
