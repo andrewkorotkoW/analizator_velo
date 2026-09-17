@@ -12,6 +12,8 @@ class Workout:
     duration_min: float
     avg_speed_kmh: Optional[float] = None
     avg_hr: Optional[float] = None
+    elevation_gain_m: Optional[float] = None
+    source: str = "csv"
     id: Optional[int] = None
 
     def to_dict(self) -> dict:
