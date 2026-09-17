@@ -32,6 +32,7 @@ class Workout:
     avg_hr: Optional[float] = None
     elevation_gain_m: Optional[float] = None
     source: str = "csv"
+    photo_path: Optional[str] = None
     id: Optional[int] = None
 
     def to_dict(self) -> dict:

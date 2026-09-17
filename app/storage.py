@@ -40,6 +40,7 @@ _MIGRATION_COLUMNS = {
     "source": "TEXT DEFAULT 'csv'",
     "elevation_gain_m": "REAL",
     "user_id": "INTEGER",
+    "photo_path": "TEXT",
 }
 
 DUPLICATE_TOLERANCE = 0.01  # ±1% по дистанции считается той же тренировкой
@@ -229,8 +230,8 @@ def save_workouts(user_email: str, workouts: List[Workout], user_id: Optional[in
                 """
                 INSERT INTO workouts
                     (user_email, user_id, date, distance_km, duration_min, avg_speed_kmh, avg_hr,
-                     elevation_gain_m, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     elevation_gain_m, source, photo_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -243,6 +244,7 @@ def save_workouts(user_email: str, workouts: List[Workout], user_id: Optional[in
                         w.avg_hr,
                         w.elevation_gain_m,
                         w.source,
+                        w.photo_path,
                     )
                     for w in to_insert
                 ],
@@ -282,6 +284,7 @@ def get_workouts(user_email: Optional[str] = None, user_id: Optional[int] = None
                 avg_hr=row["avg_hr"],
                 elevation_gain_m=row["elevation_gain_m"],
                 source=row["source"] or "csv",
+                photo_path=row["photo_path"],
             )
             for row in rows
         ]

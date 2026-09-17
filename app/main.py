@@ -3,10 +3,20 @@ import os
 import zipfile
 from functools import wraps
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.models import Workout
+from app.ocr import recognize_text
 from app.parser import ParseError, parse_file
+from app.photo_parse import parse_ocr_text
+from app.photos import (
+    PhotoError,
+    finalize_photo,
+    resolve_permanent_photo,
+    save_temp_photo,
+    temp_photo_path,
+)
 from app.recommendations import (
     build_recommendations,
     hr_zone_distribution,
@@ -39,6 +49,21 @@ def _parse_optional_int(value):
 
 def _parse_optional_float(value):
     value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _coerce_float(value):
+    """Как _parse_optional_float, но принимает и уже готовые числа (для JSON-тела)."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    value = str(value).strip().replace(",", ".")
     if not value:
         return None
     try:
@@ -209,6 +234,106 @@ def create_app() -> Flask:
         user = get_current_user()
         workouts = get_workouts(user_id=user.id)
         return jsonify([w.to_dict() for w in workouts])
+
+    @app.post("/api/workouts/photo")
+    @login_required
+    def upload_workout_photo():
+        """Загружает фото тренировки, прогоняет OCR и возвращает распознанные поля
+        для подтверждения. Тренировка на этом шаге ещё не сохраняется."""
+        uploaded = request.files.get("photo")
+        if not uploaded or not uploaded.filename:
+            return jsonify({"error": "Не передано фото (поле 'photo')"}), 400
+
+        content = uploaded.read()
+        try:
+            token = save_temp_photo(content, uploaded.filename)
+        except PhotoError as e:
+            return jsonify({"error": str(e)}), 400
+
+        with open(temp_photo_path(token), "rb") as f:
+            image_bytes = f.read()
+
+        ocr_result = recognize_text(image_bytes)
+        parsed = parse_ocr_text(ocr_result["text"])
+
+        return (
+            jsonify(
+                {
+                    "photo_token": token,
+                    "photo_url": url_for("serve_temp_photo", token=token),
+                    "ocr_backend": ocr_result["backend"],
+                    "ocr_message": ocr_result["message"],
+                    "fields": {
+                        "date": parsed["date"],
+                        "distance_km": parsed["distance_km"],
+                        "duration_min": parsed["duration_min"],
+                        "avg_speed_kmh": parsed["avg_speed_kmh"],
+                        "avg_hr": parsed["avg_hr"],
+                        "elevation_gain_m": parsed["elevation_gain_m"],
+                    },
+                    "confidence": parsed["confidence"],
+                    "fragments": parsed["fragments"],
+                }
+            ),
+            201,
+        )
+
+    @app.get("/api/photos/tmp/<token>")
+    @login_required
+    def serve_temp_photo(token):
+        path = temp_photo_path(token)
+        if not path:
+            return jsonify({"error": "Фото не найдено"}), 404
+        return send_file(path, mimetype="image/jpeg")
+
+    @app.get("/api/photos/<path:relpath>")
+    @login_required
+    def serve_user_photo(relpath):
+        user = get_current_user()
+        resolved = resolve_permanent_photo(relpath)
+        if not resolved or resolved[0] != user.id:
+            return jsonify({"error": "Фото не найдено"}), 404
+        return send_file(resolved[1], mimetype="image/jpeg")
+
+    @app.post("/api/workouts/photo/confirm")
+    @login_required
+    def confirm_workout_photo():
+        """Сохраняет тренировку по подтверждённым пользователем полям и токену фото."""
+        user = get_current_user()
+        data = request.get_json(silent=True) or request.form
+
+        token = (data.get("photo_token") or "").strip()
+        if not token:
+            return jsonify({"error": "Не передан photo_token"}), 400
+
+        date = (data.get("date") or "").strip()
+        distance_km = _coerce_float(data.get("distance_km"))
+        duration_min = _coerce_float(data.get("duration_min"))
+        avg_speed_kmh = _coerce_float(data.get("avg_speed_kmh"))
+        avg_hr = _coerce_float(data.get("avg_hr"))
+        elevation_gain_m = _coerce_float(data.get("elevation_gain_m"))
+
+        if not date or distance_km is None or duration_min is None:
+            return jsonify({"error": "Укажите дату, дистанцию и время тренировки"}), 400
+
+        try:
+            relative_photo_path = finalize_photo(token, user.id)
+        except PhotoError as e:
+            return jsonify({"error": str(e)}), 400
+
+        workout = Workout(
+            user_email=user.email,
+            date=date,
+            distance_km=distance_km,
+            duration_min=duration_min,
+            avg_speed_kmh=avg_speed_kmh,
+            avg_hr=avg_hr,
+            elevation_gain_m=elevation_gain_m,
+            source="photo",
+            photo_path=relative_photo_path,
+        )
+        result = save_workouts(user.email, [workout], user_id=user.id)
+        return jsonify({"saved": result["saved"], "duplicates": result["duplicates"]}), 201
 
     @app.delete("/api/workouts/<int:workout_id>")
     @login_required

@@ -194,6 +194,75 @@
     border: 1px solid var(--warn);
     color: var(--warn);
   }
+  .source-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .source-badge.source-photo {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .source-badge svg { width: 12px; height: 12px; flex: none; }
+  .photo-link { background: none; border: none; padding: 0; cursor: pointer; }
+  .secondary-btn {
+    padding: 10px 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .confirm-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .confirm-fields input {
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    width: 100%;
+  }
+  .confirm-preview {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .confirm-preview img {
+    max-width: 220px;
+    max-height: 220px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    object-fit: contain;
+  }
+  .confirm-meta {
+    font-size: 13px;
+    color: var(--text-muted);
+    flex: 1 1 220px;
+  }
+  .confirm-meta .ocr-warning { color: var(--warn); }
+  .confirm-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+  }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -219,6 +288,58 @@
       <button type="submit" id="submitBtn">Загрузить</button>
     </form>
     <div id="status" class="status" hidden></div>
+  </div>
+
+  <div class="card">
+    <h2>Тренировка по фото</h2>
+    <form id="photoUploadForm">
+      <div class="field">
+        <label for="photoFile">Скриншот или фото трекера</label>
+        <input type="file" id="photoFile" name="photo" accept=".jpg,.jpeg,.png,.heic,.heif,image/*" required>
+      </div>
+      <button type="submit" id="photoSubmitBtn">Распознать фото</button>
+    </form>
+    <div id="photoStatus" class="status" hidden></div>
+
+    <div id="photoConfirm" hidden>
+      <div class="confirm-preview">
+        <img id="photoPreview" alt="Превью фото тренировки">
+        <div class="confirm-meta">
+          <div id="ocrMessage"></div>
+          <div id="ocrConfidence"></div>
+        </div>
+      </div>
+      <div class="confirm-fields">
+        <div class="field">
+          <label for="confirmDate">Дата</label>
+          <input type="date" id="confirmDate">
+        </div>
+        <div class="field">
+          <label for="confirmDistance">Дистанция, км</label>
+          <input type="number" step="0.01" id="confirmDistance">
+        </div>
+        <div class="field">
+          <label for="confirmDuration">Время, мин</label>
+          <input type="number" step="0.1" id="confirmDuration">
+        </div>
+        <div class="field">
+          <label for="confirmSpeed">Средняя скорость, км/ч</label>
+          <input type="number" step="0.1" id="confirmSpeed">
+        </div>
+        <div class="field">
+          <label for="confirmHr">Средний пульс</label>
+          <input type="number" step="1" id="confirmHr">
+        </div>
+        <div class="field">
+          <label for="confirmElevation">Набор высоты, м</label>
+          <input type="number" step="1" id="confirmElevation">
+        </div>
+      </div>
+      <div class="confirm-actions">
+        <button type="button" id="confirmSaveBtn">Сохранить</button>
+        <button type="button" id="confirmCancelBtn" class="secondary-btn">Отмена</button>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -302,6 +423,29 @@
   const historyBody = document.getElementById("historyBody");
   let chart = null;
   let hrZonesChart = null;
+
+  const photoUploadForm = document.getElementById("photoUploadForm");
+  const photoSubmitBtn = document.getElementById("photoSubmitBtn");
+  const photoStatus = document.getElementById("photoStatus");
+  const photoConfirm = document.getElementById("photoConfirm");
+  const photoPreview = document.getElementById("photoPreview");
+  const ocrMessage = document.getElementById("ocrMessage");
+  const ocrConfidence = document.getElementById("ocrConfidence");
+  const confirmDate = document.getElementById("confirmDate");
+  const confirmDistance = document.getElementById("confirmDistance");
+  const confirmDuration = document.getElementById("confirmDuration");
+  const confirmSpeed = document.getElementById("confirmSpeed");
+  const confirmHr = document.getElementById("confirmHr");
+  const confirmElevation = document.getElementById("confirmElevation");
+  const confirmSaveBtn = document.getElementById("confirmSaveBtn");
+  const confirmCancelBtn = document.getElementById("confirmCancelBtn");
+  let currentPhotoToken = null;
+
+  const SOURCE_LABELS = { csv: "CSV", gpx: "GPX", fit: "FIT", photo: "Фото" };
+  const CAMERA_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>' +
+    '<circle cx="12" cy="13" r="4"/></svg>';
 
   function showStatus(message, kind) {
     statusEl.textContent = message;
@@ -467,13 +611,27 @@
         fmt(w.avg_speed_kmh, 1),
         w.avg_hr === null || w.avg_hr === undefined ? "—" : Math.round(w.avg_hr),
         w.elevation_gain_m === null || w.elevation_gain_m === undefined ? "—" : Math.round(w.elevation_gain_m),
-        w.source,
       ];
       for (const value of cells) {
         const td = document.createElement("td");
         td.textContent = value;
         tr.appendChild(td);
       }
+
+      const sourceTd = document.createElement("td");
+      const isPhoto = w.source === "photo";
+      const badgeTag = isPhoto && w.photo_path ? "button" : "span";
+      const badge = document.createElement(badgeTag);
+      badge.className = "source-badge" + (isPhoto ? " source-photo" : "");
+      badge.innerHTML = (isPhoto ? CAMERA_ICON : "") + "<span>" + (SOURCE_LABELS[w.source] || w.source) + "</span>";
+      if (isPhoto && w.photo_path) {
+        badge.classList.add("photo-link");
+        badge.type = "button";
+        badge.title = "Открыть фото тренировки";
+        badge.addEventListener("click", () => window.open(`/api/photos/${w.photo_path}`, "_blank"));
+      }
+      sourceTd.appendChild(badge);
+      tr.appendChild(sourceTd);
 
       const actionTd = document.createElement("td");
       const delBtn = document.createElement("button");
@@ -555,6 +713,111 @@
       showStatus("Не удалось обработать запрос: " + err.message, "error");
     } finally {
       submitBtn.disabled = false;
+    }
+  });
+
+  function showPhotoStatus(message, kind) {
+    photoStatus.textContent = message;
+    photoStatus.className = "status " + kind;
+    photoStatus.hidden = false;
+  }
+
+  function fillConfirmField(input, value) {
+    input.value = value === null || value === undefined ? "" : value;
+  }
+
+  photoUploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    photoStatus.hidden = true;
+    photoConfirm.hidden = true;
+    photoSubmitBtn.disabled = true;
+
+    const fileInput = document.getElementById("photoFile");
+
+    try {
+      const formData = new FormData();
+      formData.append("photo", fileInput.files[0]);
+
+      const res = await fetch("/api/workouts/photo", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showPhotoStatus(data.error || "Не удалось обработать фото", "error");
+        return;
+      }
+
+      currentPhotoToken = data.photo_token;
+      photoPreview.src = data.photo_url;
+
+      fillConfirmField(confirmDate, data.fields.date);
+      fillConfirmField(confirmDistance, data.fields.distance_km);
+      fillConfirmField(confirmDuration, data.fields.duration_min);
+      fillConfirmField(confirmSpeed, data.fields.avg_speed_kmh);
+      fillConfirmField(confirmHr, data.fields.avg_hr);
+      fillConfirmField(confirmElevation, data.fields.elevation_gain_m);
+
+      if (data.ocr_message) {
+        ocrMessage.textContent = data.ocr_message;
+        ocrMessage.className = "ocr-warning";
+      } else {
+        ocrMessage.textContent = `Распознано бэкендом: ${data.ocr_backend}`;
+        ocrMessage.className = "";
+      }
+      ocrConfidence.textContent = `Уверенность распознавания: ${Math.round((data.confidence || 0) * 100)}%. Проверьте и поправьте поля перед сохранением.`;
+
+      photoConfirm.hidden = false;
+    } catch (err) {
+      showPhotoStatus("Не удалось обработать запрос: " + err.message, "error");
+    } finally {
+      photoSubmitBtn.disabled = false;
+    }
+  });
+
+  confirmCancelBtn.addEventListener("click", () => {
+    currentPhotoToken = null;
+    photoConfirm.hidden = true;
+    photoUploadForm.reset();
+  });
+
+  confirmSaveBtn.addEventListener("click", async () => {
+    if (!currentPhotoToken) {
+      return;
+    }
+    confirmSaveBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/workouts/photo/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          photo_token: currentPhotoToken,
+          date: confirmDate.value,
+          distance_km: confirmDistance.value,
+          duration_min: confirmDuration.value,
+          avg_speed_kmh: confirmSpeed.value,
+          avg_hr: confirmHr.value,
+          elevation_gain_m: confirmElevation.value,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showPhotoStatus(data.error || "Не удалось сохранить тренировку", "error");
+        return;
+      }
+
+      currentPhotoToken = null;
+      photoConfirm.hidden = true;
+      photoUploadForm.reset();
+      showPhotoStatus(
+        data.duplicates ? "Тренировка уже была сохранена ранее (дубль)" : "Тренировка сохранена",
+        "ok"
+      );
+      await loadDashboard();
+    } catch (err) {
+      showPhotoStatus("Не удалось сохранить тренировку: " + err.message, "error");
+    } finally {
+      confirmSaveBtn.disabled = false;
     }
   });
 
