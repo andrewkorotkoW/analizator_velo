@@ -186,6 +186,22 @@
     font-weight: 600;
   }
   .table-scroll { overflow-x: auto; }
+  .history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .history-header h2 { margin: 0; }
+  .export-links {
+    display: flex;
+    gap: 14px;
+    font-size: 13px;
+  }
+  .export-links a { color: var(--accent); text-decoration: none; }
+  .export-links a:hover { text-decoration: underline; }
   .delete-btn {
     padding: 5px 10px;
     font-size: 12px;
@@ -384,7 +400,13 @@
   </div>
 
   <div class="card" id="historyCard" hidden>
-    <h2>История тренировок</h2>
+    <div class="history-header">
+      <h2>История тренировок</h2>
+      <div class="export-links">
+        <a href="{{ url_for('export_csv') }}">Экспорт CSV</a>
+        <a href="{{ url_for('export_zip') }}">Экспорт GPX (ZIP)</a>
+      </div>
+    </div>
     <div class="table-scroll">
       <table class="history">
         <thead>

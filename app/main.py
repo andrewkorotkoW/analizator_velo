@@ -1,9 +1,20 @@
+import csv
 import io
 import os
 import zipfile
 from functools import wraps
 
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.models import Workout
@@ -32,9 +43,20 @@ from app.storage import (
     has_legacy_workouts,
     init_db,
     migrate_email_to_user,
+    save_gpx_track,
     save_workouts,
     update_user_profile,
 )
+
+EXPORT_CSV_COLUMNS = [
+    "date",
+    "distance_km",
+    "duration_min",
+    "avg_speed_kmh",
+    "avg_hr",
+    "elevation_gain_m",
+    "source",
+]
 
 
 def _parse_optional_int(value):
@@ -192,9 +214,14 @@ def create_app() -> Flask:
 
         def parse_into(filename, content):
             try:
-                workouts.extend(parse_file(filename, content, user.email))
+                parsed = parse_file(filename, content, user.email)
             except ParseError as e:
                 errors.append({"filename": filename, "message": str(e)})
+                return
+            for w in parsed:
+                if w.source == "gpx":
+                    w.gpx_path = save_gpx_track(user.id, content)
+            workouts.extend(parsed)
 
         for uploaded_file in uploaded_files:
             filename = uploaded_file.filename
@@ -356,6 +383,50 @@ def create_app() -> Flask:
                 "hr_zones": hr_zone_distribution(workouts, max_hr),
             }
         )
+
+    @app.get("/api/export.csv")
+    @login_required
+    def export_csv():
+        user = get_current_user()
+        workouts = get_workouts(user_id=user.id)
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(EXPORT_CSV_COLUMNS)
+        for w in workouts:
+            writer.writerow(
+                [
+                    w.date,
+                    w.distance_km,
+                    w.duration_min,
+                    w.avg_speed_kmh if w.avg_speed_kmh is not None else "",
+                    w.avg_hr if w.avg_hr is not None else "",
+                    w.elevation_gain_m if w.elevation_gain_m is not None else "",
+                    w.source,
+                ]
+            )
+
+        response = Response(buffer.getvalue(), mimetype="text/csv")
+        response.headers["Content-Disposition"] = "attachment; filename=workouts.csv"
+        return response
+
+    @app.get("/api/export.zip")
+    @login_required
+    def export_zip():
+        user = get_current_user()
+        workouts = get_workouts(user_id=user.id)
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for w in workouts:
+                if not w.gpx_path or not os.path.isfile(w.gpx_path):
+                    continue
+                archive.write(w.gpx_path, arcname=f"{w.date}_{w.id}.gpx")
+        buffer.seek(0)
+
+        response = Response(buffer.getvalue(), mimetype="application/zip")
+        response.headers["Content-Disposition"] = "attachment; filename=workouts_tracks.zip"
+        return response
 
     return app
 

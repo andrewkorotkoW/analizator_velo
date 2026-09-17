@@ -23,6 +23,7 @@ def client(tmp_path, monkeypatch):
     """Свежее Flask-приложение с изолированной БД на каждый тест."""
     db_path = tmp_path / "test.db"
     monkeypatch.setattr(storage, "DB_PATH", str(db_path))
+    monkeypatch.setattr(storage, "TRACKS_DIR", str(tmp_path / "tracks"))
     flask_app = create_app()
     flask_app.config.update(TESTING=True)
     with flask_app.test_client() as test_client:

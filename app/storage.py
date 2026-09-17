@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import uuid
 from typing import List, Optional
 
 from app.models import User, Workout
@@ -7,6 +8,13 @@ from app.models import User, Workout
 DB_PATH = os.environ.get(
     "ANAL_VELO_DB_PATH",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data.db"),
+)
+
+TRACKS_DIR = os.environ.get(
+    "ANAL_VELO_TRACKS_DIR",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "workspace", "tracks"
+    ),
 )
 
 _SCHEMA = """
@@ -41,6 +49,7 @@ _MIGRATION_COLUMNS = {
     "elevation_gain_m": "REAL",
     "user_id": "INTEGER",
     "photo_path": "TEXT",
+    "gpx_path": "TEXT",
 }
 
 DUPLICATE_TOLERANCE = 0.01  # ±1% по дистанции считается той же тренировкой
@@ -178,6 +187,16 @@ def migrate_email_to_user(email: str, user_id: int) -> int:
         conn.close()
 
 
+def save_gpx_track(user_id: int, content: bytes) -> str:
+    """Сохраняет исходный GPX-файл на диск и возвращает путь для колонки gpx_path."""
+    user_dir = os.path.join(TRACKS_DIR, str(user_id))
+    os.makedirs(user_dir, exist_ok=True)
+    path = os.path.join(user_dir, f"{uuid.uuid4().hex}.gpx")
+    with open(path, "wb") as f:
+        f.write(content)
+    return path
+
+
 def _is_duplicate(known, date: str, distance_km: float) -> bool:
     for known_date, known_distance in known:
         if known_date != date:
@@ -230,8 +249,8 @@ def save_workouts(user_email: str, workouts: List[Workout], user_id: Optional[in
                 """
                 INSERT INTO workouts
                     (user_email, user_id, date, distance_km, duration_min, avg_speed_kmh, avg_hr,
-                     elevation_gain_m, source, photo_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     elevation_gain_m, source, photo_path, gpx_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -245,6 +264,7 @@ def save_workouts(user_email: str, workouts: List[Workout], user_id: Optional[in
                         w.elevation_gain_m,
                         w.source,
                         w.photo_path,
+                        w.gpx_path,
                     )
                     for w in to_insert
                 ],
@@ -285,6 +305,7 @@ def get_workouts(user_email: Optional[str] = None, user_id: Optional[int] = None
                 elevation_gain_m=row["elevation_gain_m"],
                 source=row["source"] or "csv",
                 photo_path=row["photo_path"],
+                gpx_path=row["gpx_path"],
             )
             for row in rows
         ]
