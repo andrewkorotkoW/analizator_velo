@@ -4,8 +4,16 @@ import zipfile
 from flask import Flask, jsonify, render_template, request
 
 from app.parser import ParseError, parse_file
-from app.recommendations import build_recommendation
+from app.recommendations import (
+    build_recommendations,
+    hr_zone_distribution,
+    resolve_max_hr,
+    weekly_volume,
+)
 from app.storage import get_workouts, init_db, save_workouts
+
+# Профиль пользователя (и его max_hr) появится в задаче логина — до тех пор используем дефолт.
+DEFAULT_USER_MAX_HR = None
 
 
 def create_app() -> Flask:
@@ -83,7 +91,14 @@ def create_app() -> Flask:
             return jsonify({"error": "Не передан user_email"}), 400
 
         workouts = get_workouts(user_email)
-        return jsonify({"recommendation": build_recommendation(workouts)})
+        max_hr = resolve_max_hr(DEFAULT_USER_MAX_HR)
+        return jsonify(
+            {
+                "recommendations": build_recommendations(workouts, max_hr=max_hr),
+                "weekly": weekly_volume(workouts),
+                "hr_zones": hr_zone_distribution(workouts, max_hr),
+            }
+        )
 
     return app
 
