@@ -115,8 +115,44 @@
   #recommendationBox {
     font-size: 15px;
     line-height: 1.5;
+  }
+  #recommendationBox ul {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #recommendationBox li {
     border-left: 3px solid var(--accent);
     padding-left: 12px;
+  }
+  h2 {
+    font-size: 16px;
+    margin: 0 0 14px;
+  }
+  .weekly-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+  .stat {
+    flex: 1 1 120px;
+  }
+  .stat .label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .stat .value {
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .stat .value.ok { color: var(--ok); }
+  .stat .value.warn { color: var(--warn); }
+  .chart-box.small {
+    height: 220px;
   }
   [hidden] { display: none !important; }
 </style>
@@ -148,7 +184,37 @@
     </div>
   </div>
 
+  <div class="card" id="weeklyCard" hidden>
+    <h2>Неделя</h2>
+    <div class="weekly-stats">
+      <div class="stat">
+        <div class="label">Дистанция</div>
+        <div class="value" id="weeklyDistance">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Время</div>
+        <div class="value" id="weeklyHours">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Тренировок</div>
+        <div class="value" id="weeklyCount">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">К среднему за 4 недели</div>
+        <div class="value" id="weeklyChange">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="hrZonesCard" hidden>
+    <h2>Зоны пульса</h2>
+    <div class="chart-box small">
+      <canvas id="hrZonesChart"></canvas>
+    </div>
+  </div>
+
   <div class="card" id="recommendationCard" hidden>
+    <h2>Рекомендации</h2>
     <div id="recommendationBox"></div>
   </div>
 </div>
@@ -161,7 +227,14 @@
   const chartBox = document.getElementById("chartBox");
   const recommendationCard = document.getElementById("recommendationCard");
   const recommendationBox = document.getElementById("recommendationBox");
+  const weeklyCard = document.getElementById("weeklyCard");
+  const weeklyDistance = document.getElementById("weeklyDistance");
+  const weeklyHours = document.getElementById("weeklyHours");
+  const weeklyCount = document.getElementById("weeklyCount");
+  const weeklyChange = document.getElementById("weeklyChange");
+  const hrZonesCard = document.getElementById("hrZonesCard");
   let chart = null;
+  let hrZonesChart = null;
 
   function showStatus(message, kind) {
     statusEl.textContent = message;
@@ -230,6 +303,80 @@
     });
   }
 
+  function renderWeekly(weekly) {
+    if (!weekly || weekly.count === 0) {
+      weeklyCard.hidden = true;
+      return;
+    }
+    weeklyCard.hidden = false;
+    weeklyDistance.textContent = `${weekly.distance_km.toFixed(1)} км`;
+    weeklyHours.textContent = `${weekly.duration_hours.toFixed(1)} ч`;
+    weeklyCount.textContent = weekly.count;
+
+    if (weekly.change_pct === null || weekly.change_pct === undefined) {
+      weeklyChange.textContent = "—";
+      weeklyChange.className = "value";
+    } else {
+      const sign = weekly.change_pct > 0 ? "+" : "";
+      weeklyChange.textContent = `${sign}${weekly.change_pct.toFixed(0)}%`;
+      weeklyChange.className = "value " + (weekly.change_pct > 10 ? "warn" : "ok");
+    }
+  }
+
+  function renderHrZones(hrZones) {
+    const entries = Object.entries(hrZones || {});
+    const totalCount = entries.reduce((sum, [, z]) => sum + z.count, 0);
+    if (!totalCount) {
+      hrZonesCard.hidden = true;
+      return;
+    }
+    hrZonesCard.hidden = false;
+
+    const labels = entries.map(([name]) => name);
+    const durations = entries.map(([, z]) => z.duration_min);
+
+    const ctx = document.getElementById("hrZonesChart").getContext("2d");
+    if (hrZonesChart) {
+      hrZonesChart.destroy();
+    }
+    hrZonesChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: "Минуты в зоне",
+            data: durations,
+            backgroundColor: "#3763e8",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: "мин" },
+          },
+        },
+      },
+    });
+  }
+
+  function renderRecommendations(recommendations) {
+    recommendationBox.innerHTML = "";
+    const list = document.createElement("ul");
+    for (const text of recommendations) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      list.appendChild(li);
+    }
+    recommendationBox.appendChild(list);
+    recommendationCard.hidden = false;
+  }
+
   async function loadDashboard(userEmail) {
     const [workoutsRes, recRes] = await Promise.all([
       fetch(`/api/workouts?user_email=${encodeURIComponent(userEmail)}`),
@@ -243,9 +390,10 @@
     renderChart(workouts);
 
     if (recRes.ok) {
-      const rec = await recRes.json();
-      recommendationBox.textContent = rec.recommendation;
-      recommendationCard.hidden = false;
+      const data = await recRes.json();
+      renderRecommendations(data.recommendations || []);
+      renderWeekly(data.weekly);
+      renderHrZones(data.hr_zones);
     }
   }
 
