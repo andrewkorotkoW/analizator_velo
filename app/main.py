@@ -1,6 +1,9 @@
+import io
+import zipfile
+
 from flask import Flask, jsonify, render_template, request
 
-from app.parser import CsvParseError, parse_csv
+from app.parser import ParseError, parse_file
 from app.recommendations import build_recommendation
 from app.storage import get_workouts, init_db, save_workouts
 
@@ -19,22 +22,50 @@ def create_app() -> Flask:
         if not user_email:
             return jsonify({"error": "Не передан user_email"}), 400
 
-        uploaded_file = request.files.get("file")
-        if uploaded_file is None or uploaded_file.filename == "":
-            return jsonify({"error": "Не передан CSV-файл (поле 'file')"}), 400
+        uploaded_files = [f for f in request.files.getlist("file") if f and f.filename]
+        if not uploaded_files:
+            return jsonify({"error": "Не передан файл с тренировками (поле 'file')"}), 400
 
-        try:
-            content = uploaded_file.read().decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return jsonify({"error": "Файл должен быть в кодировке UTF-8"}), 400
+        workouts = []
+        errors = []
 
-        try:
-            workouts = parse_csv(content, user_email)
-        except CsvParseError as e:
-            return jsonify({"error": str(e)}), 400
+        def parse_into(filename, content):
+            try:
+                workouts.extend(parse_file(filename, content, user_email))
+            except ParseError as e:
+                errors.append({"filename": filename, "message": str(e)})
 
-        saved = save_workouts(user_email, workouts)
-        return jsonify({"saved": saved}), 201
+        for uploaded_file in uploaded_files:
+            filename = uploaded_file.filename
+            raw = uploaded_file.read()
+
+            if filename.lower().endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                        for member in archive.namelist():
+                            if member.endswith("/"):
+                                continue
+                            parse_into(member, archive.read(member))
+                except zipfile.BadZipFile:
+                    errors.append({"filename": filename, "message": "Повреждённый ZIP-архив"})
+                continue
+
+            parse_into(filename, raw)
+
+        if not workouts:
+            return jsonify({"error": "Не удалось разобрать ни один файл", "errors": errors}), 400
+
+        result = save_workouts(user_email, workouts)
+        return (
+            jsonify(
+                {
+                    "saved": result["saved"],
+                    "duplicates": result["duplicates"],
+                    "errors": errors,
+                }
+            ),
+            201,
+        )
 
     @app.get("/api/workouts")
     def list_workouts():
