@@ -2,13 +2,15 @@
    Использует те же CSS-переменные темы, что и dashboard.html (--bg, --text, ...).
 
    Слои картинки (app/static/img/loader/, см. scripts/split_cyclist.py):
-   wheel_rear.png / wheel_front.png — круглые вырезки колёс (крутятся),
-   body.png — всё остальное с прозрачными дырками на месте колёс.
-   Позиционирование колёс ниже задано в процентах от квадратного .velo-loader-scene
-   и соответствует геометрии исходной иллюстрации 360×360 (запас WHEEL_MARGIN=6px,
-   радиус колеса ~62px, центры (78,258) и (292,258) — см. scripts/split_cyclist.py).
-   При замене иллюстрации на существенно другую раскладку эти проценты нужно
-   пересчитать вручную. */
+   wheel_rear.png / wheel_front.png — колёса (крутятся, подложены ПОД телом),
+   body.png — рама/райдер с прозрачными дырками на месте колёс.
+   Позиционирование и размер колёс ниже — не ручные числа, а CSS-переменные
+   --velo-wheel-{rear,front}-{left,top,size} из app/static/css/
+   loader_geometry.generated.css (подключается раньше этого файла и
+   пересчитывается вместе со слоями скриптом split_cyclist.py из геометрии,
+   найденной автодетекцией на самой иллюстрации). Запасные значения в var(...)
+   ниже — те же числа на случай, если сгенерированный файл почему-то не
+   загрузился. */
 
 .velo-loader-overlay {
   position: fixed;
@@ -64,20 +66,23 @@
 
 .velo-loader-wheel {
   position: absolute;
-  width: 37.778%;
-  height: 37.778%;
   transform-origin: 50% 50%;
   animation: velo-loader-spin 0.6s linear infinite;
+  z-index: 1;
 }
 
 .velo-loader-wheel-rear {
-  left: 2.778%;
-  top: 52.778%;
+  left: var(--velo-wheel-rear-left, 7.5%);
+  top: var(--velo-wheel-rear-top, 54.444%);
+  width: var(--velo-wheel-rear-size, 35.278%);
+  height: var(--velo-wheel-rear-size, 35.278%);
 }
 
 .velo-loader-wheel-front {
-  left: 62.222%;
-  top: 52.778%;
+  left: var(--velo-wheel-front-left, 57.222%);
+  top: var(--velo-wheel-front-top, 54.722%);
+  width: var(--velo-wheel-front-size, 35%);
+  height: var(--velo-wheel-front-size, 35%);
 }
 
 .velo-loader-body-img {
@@ -85,6 +90,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  z-index: 2;
 }
 
 /* ---- Дорога: серая полоса с бегущей белой прерывистой разметкой. ---- */
