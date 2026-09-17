@@ -1,20 +1,16 @@
-import pytest
-
-import app.storage as storage
-from app.main import create_app
+from conftest import register_and_login
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    db_path = tmp_path / "dashboard_route_test.db"
-    monkeypatch.setattr(storage, "DB_PATH", str(db_path))
-    flask_app = create_app()
-    flask_app.config.update(TESTING=True)
-    with flask_app.test_client() as test_client:
-        yield test_client
+def test_dashboard_route_redirects_to_login_when_not_authenticated(client):
+    resp = client.get("/")
+
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
 
 
-def test_dashboard_route_returns_200_html(client):
+def test_dashboard_route_returns_200_html_when_logged_in(client):
+    register_and_login(client, "user@example.com")
+
     resp = client.get("/")
 
     assert resp.status_code == 200
@@ -22,18 +18,20 @@ def test_dashboard_route_returns_200_html(client):
 
 
 def test_dashboard_html_contains_upload_form_with_required_fields(client):
+    register_and_login(client, "user@example.com")
+
     resp = client.get("/")
     body = resp.get_data(as_text=True)
 
     assert '<form id="uploadForm">' in body
-    assert 'name="user_email"' in body
-    assert 'type="email"' in body
     assert 'name="file"' in body
     assert 'type="file"' in body
-    assert 'accept=".csv"' in body
+    assert 'accept=".csv,.gpx,.fit,.zip"' in body
 
 
 def test_dashboard_html_contains_submit_button(client):
+    register_and_login(client, "user@example.com")
+
     resp = client.get("/")
     body = resp.get_data(as_text=True)
 
@@ -42,6 +40,8 @@ def test_dashboard_html_contains_submit_button(client):
 
 
 def test_dashboard_html_contains_chart_and_recommendation_placeholders(client):
+    register_and_login(client, "user@example.com")
+
     resp = client.get("/")
     body = resp.get_data(as_text=True)
 
@@ -50,8 +50,10 @@ def test_dashboard_html_contains_chart_and_recommendation_placeholders(client):
     assert 'id="emptyState"' in body
 
 
-def test_dashboard_route_does_not_depend_on_query_params(client):
-    resp = client.get("/", query_string={"user_email": "someone@example.com"})
+def test_dashboard_html_shows_current_users_email_in_nav(client):
+    register_and_login(client, "user@example.com")
 
-    assert resp.status_code == 200
-    assert '<form id="uploadForm">' in resp.get_data(as_text=True)
+    resp = client.get("/")
+    body = resp.get_data(as_text=True)
+
+    assert "user@example.com" in body
