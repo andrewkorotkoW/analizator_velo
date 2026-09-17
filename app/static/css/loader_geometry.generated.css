@@ -1,0 +1,10 @@
+/* Автосгенерировано scripts/split_cyclist.py из loader_geometry.json.
+   Не редактировать руками — пересчитывается вместе со слоями колёс. */
+:root {
+  --velo-wheel-rear-left: 7.500%;
+  --velo-wheel-rear-top: 54.444%;
+  --velo-wheel-rear-size: 35.278%;
+  --velo-wheel-front-left: 57.222%;
+  --velo-wheel-front-top: 54.722%;
+  --velo-wheel-front-size: 35.000%;
+}
