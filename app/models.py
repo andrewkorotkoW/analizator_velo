@@ -3,6 +3,24 @@ from typing import Optional
 
 
 @dataclass
+class User:
+    """Зарегистрированный пользователь."""
+
+    email: str
+    password_hash: str
+    name: Optional[str] = None
+    age: Optional[int] = None
+    max_hr: Optional[int] = None
+    weight: Optional[float] = None
+    id: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data.pop("password_hash", None)
+        return data
+
+
+@dataclass
 class Workout:
     """Одна тренировка пользователя."""
 

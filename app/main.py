@@ -1,7 +1,10 @@
 import io
+import os
 import zipfile
+from functools import wraps
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.parser import ParseError, parse_file
 from app.recommendations import (
@@ -10,25 +13,150 @@ from app.recommendations import (
     resolve_max_hr,
     weekly_volume,
 )
-from app.storage import get_workouts, init_db, save_workouts
+from app.storage import (
+    create_user,
+    delete_workout,
+    get_user_by_email,
+    get_user_by_id,
+    get_workouts,
+    has_legacy_workouts,
+    init_db,
+    migrate_email_to_user,
+    save_workouts,
+    update_user_profile,
+)
 
-# Профиль пользователя (и его max_hr) появится в задаче логина — до тех пор используем дефолт.
-DEFAULT_USER_MAX_HR = None
+
+def _parse_optional_int(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _parse_optional_float(value):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.secret_key = os.environ.get("ANAL_VELO_SECRET_KEY", "dev-secret-key-change-me")
     init_db()
 
+    def get_current_user():
+        user_id = session.get("user_id")
+        if user_id is None:
+            return None
+        return get_user_by_id(user_id)
+
+    def login_required(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not session.get("user_id"):
+                if request.path.startswith("/api/"):
+                    return jsonify({"error": "Требуется вход"}), 401
+                return redirect(url_for("login"))
+            return view(*args, **kwargs)
+
+        return wrapped
+
     @app.get("/")
+    @login_required
     def dashboard():
-        return render_template("dashboard.html")
+        user = get_current_user()
+        return render_template("dashboard.html", user=user)
+
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        error = None
+        if request.method == "POST":
+            email = (request.form.get("email") or "").strip().lower()
+            password = request.form.get("password") or ""
+            password2 = request.form.get("password2") or ""
+            name = (request.form.get("name") or "").strip() or None
+            age = _parse_optional_int(request.form.get("age"))
+            max_hr = _parse_optional_int(request.form.get("max_hr"))
+            weight = _parse_optional_float(request.form.get("weight"))
+
+            if not email or not password:
+                error = "Укажите email и пароль"
+            elif password != password2:
+                error = "Пароли не совпадают"
+            elif get_user_by_email(email) is not None:
+                error = "Пользователь с таким email уже зарегистрирован"
+
+            if error is None:
+                user = create_user(
+                    email=email,
+                    password_hash=generate_password_hash(password),
+                    name=name,
+                    age=age,
+                    max_hr=max_hr,
+                    weight=weight,
+                )
+                migrate_email_to_user(email, user.id)
+                session["user_id"] = user.id
+                return redirect(url_for("dashboard"))
+
+        return render_template("register.html", error=error)
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        error = None
+        hint = None
+        if request.method == "POST":
+            email = (request.form.get("email") or "").strip().lower()
+            password = request.form.get("password") or ""
+            user = get_user_by_email(email)
+
+            if user is not None and check_password_hash(user.password_hash, password):
+                session["user_id"] = user.id
+                migrate_email_to_user(email, user.id)
+                return redirect(url_for("dashboard"))
+
+            if user is None and email and has_legacy_workouts(email):
+                hint = (
+                    f"Для {email} есть сохранённые тренировки, но пароль ещё не задан — "
+                    "зарегистрируйтесь с этим email, чтобы получить к ним доступ."
+                )
+            else:
+                error = "Неверный email или пароль"
+
+        return render_template("login.html", error=error, hint=hint)
+
+    @app.get("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
+
+    @app.route("/profile", methods=["GET", "POST"])
+    @login_required
+    def profile():
+        user = get_current_user()
+        saved = False
+        if request.method == "POST":
+            name = (request.form.get("name") or "").strip() or None
+            age = _parse_optional_int(request.form.get("age"))
+            max_hr = _parse_optional_int(request.form.get("max_hr"))
+            weight = _parse_optional_float(request.form.get("weight"))
+            user = update_user_profile(user.id, name=name, age=age, max_hr=max_hr, weight=weight)
+            saved = True
+
+        return render_template("profile.html", user=user, saved=saved)
 
     @app.post("/api/workouts/upload")
+    @login_required
     def upload_workouts():
-        user_email = request.form.get("user_email")
-        if not user_email:
-            return jsonify({"error": "Не передан user_email"}), 400
+        user = get_current_user()
 
         uploaded_files = [f for f in request.files.getlist("file") if f and f.filename]
         if not uploaded_files:
@@ -39,7 +167,7 @@ def create_app() -> Flask:
 
         def parse_into(filename, content):
             try:
-                workouts.extend(parse_file(filename, content, user_email))
+                workouts.extend(parse_file(filename, content, user.email))
             except ParseError as e:
                 errors.append({"filename": filename, "message": str(e)})
 
@@ -63,7 +191,7 @@ def create_app() -> Flask:
         if not workouts:
             return jsonify({"error": "Не удалось разобрать ни один файл", "errors": errors}), 400
 
-        result = save_workouts(user_email, workouts)
+        result = save_workouts(user.email, workouts, user_id=user.id)
         return (
             jsonify(
                 {
@@ -76,22 +204,26 @@ def create_app() -> Flask:
         )
 
     @app.get("/api/workouts")
+    @login_required
     def list_workouts():
-        user_email = request.args.get("user_email")
-        if not user_email:
-            return jsonify({"error": "Не передан user_email"}), 400
-
-        workouts = get_workouts(user_email)
+        user = get_current_user()
+        workouts = get_workouts(user_id=user.id)
         return jsonify([w.to_dict() for w in workouts])
 
-    @app.get("/api/recommendations")
-    def recommendations():
-        user_email = request.args.get("user_email")
-        if not user_email:
-            return jsonify({"error": "Не передан user_email"}), 400
+    @app.delete("/api/workouts/<int:workout_id>")
+    @login_required
+    def delete_workout_route(workout_id):
+        user = get_current_user()
+        if not delete_workout(user.id, workout_id):
+            return jsonify({"error": "Тренировка не найдена"}), 404
+        return jsonify({"deleted": True})
 
-        workouts = get_workouts(user_email)
-        max_hr = resolve_max_hr(DEFAULT_USER_MAX_HR)
+    @app.get("/api/recommendations")
+    @login_required
+    def recommendations():
+        user = get_current_user()
+        workouts = get_workouts(user_id=user.id)
+        max_hr = resolve_max_hr(user.max_hr, user.age)
         return jsonify(
             {
                 "recommendations": build_recommendations(workouts, max_hr=max_hr),
