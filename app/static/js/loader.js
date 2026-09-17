@@ -53,54 +53,38 @@
     return pct;
   }
 
+  var DEFAULT_IMG_BASE = "/static/img/loader/";
+
+  /**
+   * Базовый путь до app/static/img/loader/ для картинок велосипедиста, выведенный
+   * из URL самого loader.js (чтобы работать независимо от префикса, под которым
+   * Flask монтирует /static). scriptSrc — значение document.currentScript.src.
+   * Если распознать не удалось (script загружен не как файл js/loader.js,
+   * например инлайново в тестах) — используется DEFAULT_IMG_BASE.
+   */
+  function computeImageBase(scriptSrc) {
+    if (typeof scriptSrc === "string" && scriptSrc.length) {
+      var match = scriptSrc.match(/^(.*\/)js\/loader\.js(?:[?#].*)?$/);
+      if (match) {
+        return match[1] + "img/loader/";
+      }
+    }
+    return DEFAULT_IMG_BASE;
+  }
+
   var api = {
     MIN_VISIBLE_MS: MIN_VISIBLE_MS,
     formatProgressLabel: formatProgressLabel,
     getOverlayConfig: getOverlayConfig,
     computeProgressPercent: computeProgressPercent,
+    computeImageBase: computeImageBase,
   };
 
   // ---- DOM-зависимая часть: не выполняется при прогоне чистых функций через node ----
   if (typeof document !== "undefined") {
-    var BIKE_SVG =
-      '<svg class="velo-loader-svg" viewBox="0 0 200 110" xmlns="http://www.w3.org/2000/svg" focusable="false">' +
-        '<line class="velo-loader-road" x1="0" y1="90" x2="200" y2="90" />' +
-        '<g class="velo-loader-dashes">' +
-          '<g class="velo-loader-dashes-track">' +
-            '<rect x="-30" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="0" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="30" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="60" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="90" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="120" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="150" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="180" y="88" width="14" height="4" rx="2" />' +
-            '<rect x="210" y="88" width="14" height="4" rx="2" />' +
-          "</g>" +
-        "</g>" +
-        '<g class="velo-loader-body">' +
-          '<path class="velo-loader-frame-line" d="M55,72 L90,38 L125,38 L140,72 M90,38 L90,72 L125,38" />' +
-          '<path class="velo-loader-frame-line" d="M125,38 L129,29" />' +
-          '<path class="velo-loader-handlebar" d="M121,28 C127,25 133,26 135,31 C137,36 133,39 128,38" />' +
-          '<path class="velo-loader-frame-line" d="M90,38 L94,32" />' +
-          '<circle class="velo-loader-crank" cx="90" cy="72" r="4" />' +
-          '<path class="velo-loader-frame-line" d="M90,72 L98,78 M90,72 L82,66" />' +
-          '<g transform="translate(55,72)">' +
-            '<g class="velo-loader-wheel-spin">' +
-              '<circle class="velo-loader-tire" r="14" />' +
-              '<circle class="velo-loader-hub" r="2.4" />' +
-              '<path class="velo-loader-spokes" d="M0,-11 L0,11 M-9.5,-5.5 L9.5,5.5 M-9.5,5.5 L9.5,-5.5" />' +
-            "</g>" +
-          "</g>" +
-          '<g transform="translate(140,72)">' +
-            '<g class="velo-loader-wheel-spin">' +
-              '<circle class="velo-loader-tire" r="14" />' +
-              '<circle class="velo-loader-hub" r="2.4" />' +
-              '<path class="velo-loader-spokes" d="M0,-11 L0,11 M-9.5,-5.5 L9.5,5.5 M-9.5,5.5 L9.5,-5.5" />' +
-            "</g>" +
-          "</g>" +
-        "</g>" +
-      "</svg>";
+    var IMG_BASE = computeImageBase(
+      document.currentScript && document.currentScript.src
+    );
 
     var state = {
       overlayEl: null,
@@ -113,34 +97,87 @@
       hideTimer: null,
     };
 
+    var el = function (tag, className) {
+      var node = document.createElement(tag);
+      if (className) {
+        node.className = className;
+      }
+      return node;
+    };
+
+    var buildScene = function () {
+      var scene = el("div", "velo-loader-scene");
+      scene.setAttribute("aria-hidden", "true");
+
+      var road = el("div", "velo-loader-road");
+      road.appendChild(el("div", "velo-loader-road-dashes"));
+      scene.appendChild(road);
+
+      scene.appendChild(el("div", "velo-loader-shadow"));
+
+      var speedlines = el("div", "velo-loader-speedlines");
+      speedlines.appendChild(el("div", "velo-loader-speedline"));
+      speedlines.appendChild(el("div", "velo-loader-speedline"));
+      speedlines.appendChild(el("div", "velo-loader-speedline"));
+      scene.appendChild(speedlines);
+
+      var bike = el("div", "velo-loader-bike");
+
+      var wheelRear = el("img", "velo-loader-wheel velo-loader-wheel-rear");
+      wheelRear.src = IMG_BASE + "wheel_rear.png";
+      wheelRear.alt = "";
+      bike.appendChild(wheelRear);
+
+      var wheelFront = el("img", "velo-loader-wheel velo-loader-wheel-front");
+      wheelFront.src = IMG_BASE + "wheel_front.png";
+      wheelFront.alt = "";
+      bike.appendChild(wheelFront);
+
+      var body = el("img", "velo-loader-body-img");
+      body.src = IMG_BASE + "body.png";
+      body.alt = "";
+      bike.appendChild(body);
+
+      scene.appendChild(bike);
+      return scene;
+    };
+
     var ensureMounted = function () {
       if (state.overlayEl) {
         return;
       }
-      var overlay = document.createElement("div");
-      overlay.className = "velo-loader-overlay";
+      var overlay = el("div", "velo-loader-overlay");
       overlay.id = "veloLoaderOverlay";
       overlay.setAttribute("role", "status");
       overlay.setAttribute("aria-live", "polite");
       overlay.hidden = true;
-      overlay.innerHTML =
-        '<div class="velo-loader-panel">' +
-          '<div class="velo-loader-scene" aria-hidden="true">' + BIKE_SVG + "</div>" +
-          '<div class="velo-loader-text">' +
-            '<div class="velo-loader-title" data-role="title"></div>' +
-            '<div class="velo-loader-progress" data-role="progress-wrap" hidden>' +
-              '<div class="velo-loader-progress-track"><div class="velo-loader-progress-bar" data-role="progress-bar"></div></div>' +
-              '<div class="velo-loader-progress-label" data-role="progress-label"></div>' +
-            "</div>" +
-          "</div>" +
-        "</div>";
+
+      var panel = el("div", "velo-loader-panel");
+      panel.appendChild(buildScene());
+
+      var text = el("div", "velo-loader-text");
+      var title = el("div", "velo-loader-title");
+      text.appendChild(title);
+
+      var progressWrap = el("div", "velo-loader-progress");
+      progressWrap.hidden = true;
+      var progressTrack = el("div", "velo-loader-progress-track");
+      var progressBar = el("div", "velo-loader-progress-bar");
+      progressTrack.appendChild(progressBar);
+      progressWrap.appendChild(progressTrack);
+      var progressLabel = el("div", "velo-loader-progress-label");
+      progressWrap.appendChild(progressLabel);
+      text.appendChild(progressWrap);
+
+      panel.appendChild(text);
+      overlay.appendChild(panel);
       document.body.appendChild(overlay);
 
       state.overlayEl = overlay;
-      state.titleEl = overlay.querySelector('[data-role="title"]');
-      state.progressWrapEl = overlay.querySelector('[data-role="progress-wrap"]');
-      state.progressBarEl = overlay.querySelector('[data-role="progress-bar"]');
-      state.progressLabelEl = overlay.querySelector('[data-role="progress-label"]');
+      state.titleEl = title;
+      state.progressWrapEl = progressWrap;
+      state.progressBarEl = progressBar;
+      state.progressLabelEl = progressLabel;
     };
 
     var render = function (kind, progress) {
