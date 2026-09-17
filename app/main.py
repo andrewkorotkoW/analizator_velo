@@ -1,12 +1,17 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 
 from app.parser import CsvParseError, parse_csv
+from app.recommendations import build_recommendation
 from app.storage import get_workouts, init_db, save_workouts
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
     init_db()
+
+    @app.get("/")
+    def dashboard():
+        return render_template("dashboard.html")
 
     @app.post("/api/workouts/upload")
     def upload_workouts():
@@ -39,6 +44,15 @@ def create_app() -> Flask:
 
         workouts = get_workouts(user_email)
         return jsonify([w.to_dict() for w in workouts])
+
+    @app.get("/api/recommendations")
+    def recommendations():
+        user_email = request.args.get("user_email")
+        if not user_email:
+            return jsonify({"error": "Не передан user_email"}), 400
+
+        workouts = get_workouts(user_email)
+        return jsonify({"recommendation": build_recommendation(workouts)})
 
     return app
 

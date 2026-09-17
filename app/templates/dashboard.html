@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд тренировок</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f8fb;
+    --surface: #ffffff;
+    --text: #1c2230;
+    --text-muted: #5b6478;
+    --border: #dfe3ec;
+    --accent: #3763e8;
+    --ok: #1f8a5f;
+    --warn: #b3541e;
+    --neutral: #5b6478;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c;
+      --surface: #1b1f2a;
+      --text: #e7e9f0;
+      --text-muted: #9aa2b6;
+      --border: #2b3040;
+      --accent: #7c96ff;
+      --ok: #4fbf8f;
+      --warn: #e08f4f;
+      --neutral: #9aa2b6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding-block: 32px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding-inline: 20px;
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 4px;
+  }
+  p.lead {
+    color: var(--text-muted);
+    margin: 0 0 24px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1 1 200px;
+  }
+  label {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  input[type="email"],
+  input[type="file"] {
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  button {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .status {
+    margin-top: 12px;
+    font-size: 14px;
+  }
+  .status.error { color: var(--warn); }
+  .status.ok { color: var(--ok); }
+  .chart-box {
+    position: relative;
+    height: 320px;
+  }
+  #emptyState {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+  #recommendationBox {
+    font-size: 15px;
+    line-height: 1.5;
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Дашборд тренировок</h1>
+  <p class="lead">Введите email и загрузите CSV с тренировками, чтобы увидеть график прогресса и рекомендацию.</p>
+
+  <div class="card">
+    <form id="uploadForm">
+      <div class="field">
+        <label for="userEmail">Email</label>
+        <input type="email" id="userEmail" name="user_email" required placeholder="you@example.com">
+      </div>
+      <div class="field">
+        <label for="csvFile">CSV с тренировками</label>
+        <input type="file" id="csvFile" name="file" accept=".csv" required>
+      </div>
+      <button type="submit" id="submitBtn">Загрузить</button>
+    </form>
+    <div id="status" class="status" hidden></div>
+  </div>
+
+  <div class="card">
+    <div id="emptyState">Пока нет данных — загрузите CSV выше.</div>
+    <div class="chart-box" id="chartBox" hidden>
+      <canvas id="progressChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card" id="recommendationCard" hidden>
+    <div id="recommendationBox"></div>
+  </div>
+</div>
+
+<script>
+  const form = document.getElementById("uploadForm");
+  const submitBtn = document.getElementById("submitBtn");
+  const statusEl = document.getElementById("status");
+  const emptyState = document.getElementById("emptyState");
+  const chartBox = document.getElementById("chartBox");
+  const recommendationCard = document.getElementById("recommendationCard");
+  const recommendationBox = document.getElementById("recommendationBox");
+  let chart = null;
+
+  function showStatus(message, kind) {
+    statusEl.textContent = message;
+    statusEl.className = "status " + kind;
+    statusEl.hidden = false;
+  }
+
+  function renderChart(workouts) {
+    if (!workouts.length) {
+      emptyState.hidden = false;
+      chartBox.hidden = true;
+      return;
+    }
+    emptyState.hidden = true;
+    chartBox.hidden = false;
+
+    const labels = workouts.map(w => w.date);
+    const distance = workouts.map(w => w.distance_km);
+    const speed = workouts.map(w => w.avg_speed_kmh);
+
+    const ctx = document.getElementById("progressChart").getContext("2d");
+    if (chart) {
+      chart.destroy();
+    }
+    chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: "Дистанция, км",
+            data: distance,
+            borderColor: "#3763e8",
+            backgroundColor: "#3763e8",
+            yAxisID: "y",
+            tension: 0.25,
+          },
+          {
+            label: "Средняя скорость, км/ч",
+            data: speed,
+            borderColor: "#e08f4f",
+            backgroundColor: "#e08f4f",
+            yAxisID: "y1",
+            tension: 0.25,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          y: {
+            type: "linear",
+            position: "left",
+            title: { display: true, text: "км" },
+          },
+          y1: {
+            type: "linear",
+            position: "right",
+            title: { display: true, text: "км/ч" },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      },
+    });
+  }
+
+  async function loadDashboard(userEmail) {
+    const [workoutsRes, recRes] = await Promise.all([
+      fetch(`/api/workouts?user_email=${encodeURIComponent(userEmail)}`),
+      fetch(`/api/recommendations?user_email=${encodeURIComponent(userEmail)}`),
+    ]);
+
+    if (!workoutsRes.ok) {
+      throw new Error("Не удалось загрузить тренировки");
+    }
+    const workouts = await workoutsRes.json();
+    renderChart(workouts);
+
+    if (recRes.ok) {
+      const rec = await recRes.json();
+      recommendationBox.textContent = rec.recommendation;
+      recommendationCard.hidden = false;
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    statusEl.hidden = true;
+    submitBtn.disabled = true;
+
+    const userEmail = document.getElementById("userEmail").value.trim();
+    const fileInput = document.getElementById("csvFile");
+
+    try {
+      const formData = new FormData();
+      formData.append("user_email", userEmail);
+      formData.append("file", fileInput.files[0]);
+
+      const uploadRes = await fetch("/api/workouts/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const uploadData = await uploadRes.json();
+
+      if (!uploadRes.ok) {
+        showStatus(uploadData.error || "Ошибка загрузки файла", "error");
+        return;
+      }
+
+      showStatus(`Загружено тренировок: ${uploadData.saved}`, "ok");
+      await loadDashboard(userEmail);
+    } catch (err) {
+      showStatus("Не удалось обработать запрос: " + err.message, "error");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
