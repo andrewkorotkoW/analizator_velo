@@ -1,5 +1,14 @@
-/* VeloLoader — оверлей с шоссейным велосипедом на дороге.
-   Использует те же CSS-переменные темы, что и dashboard.html (--bg, --text, ...). */
+/* VeloLoader — оверлей с велосипедистом (PNG-иллюстрация) на дороге.
+   Использует те же CSS-переменные темы, что и dashboard.html (--bg, --text, ...).
+
+   Слои картинки (app/static/img/loader/, см. scripts/split_cyclist.py):
+   wheel_rear.png / wheel_front.png — круглые вырезки колёс (крутятся),
+   body.png — всё остальное с прозрачными дырками на месте колёс.
+   Позиционирование колёс ниже задано в процентах от квадратного .velo-loader-scene
+   и соответствует геометрии исходной иллюстрации 360×360 (запас WHEEL_MARGIN=6px,
+   радиус колеса ~62px, центры (78,258) и (292,258) — см. scripts/split_cyclist.py).
+   При замене иллюстрации на существенно другую раскладку эти проценты нужно
+   пересчитать вручную. */
 
 .velo-loader-overlay {
   position: fixed;
@@ -29,53 +38,126 @@
   gap: 16px;
 }
 
+/* ---- Сцена: квадратный холст 180×180 (120×120 на мобиле), всё внутри —
+   абсолютно спозиционированные слои. ---- */
+
 .velo-loader-scene {
-  width: 200px;
+  position: relative;
+  width: 180px;
+  height: 180px;
   max-width: 60vw;
 }
 
-.velo-loader-svg {
-  width: 100%;
-  height: auto;
-  display: block;
-  overflow: visible;
+@media (max-width: 600px) {
+  .velo-loader-scene {
+    width: 120px;
+    height: 120px;
+  }
 }
+
+/* Тело + оба колеса двигаются вместе (лёгкое "дыхание" в такт каденсу).
+   Педали — часть body.png и не анимируются отдельно. */
+.velo-loader-bike {
+  position: absolute;
+  inset: 0;
+}
+
+.velo-loader-wheel {
+  position: absolute;
+  width: 37.778%;
+  height: 37.778%;
+  transform-origin: 50% 50%;
+  animation: velo-loader-spin 0.6s linear infinite;
+}
+
+.velo-loader-wheel-rear {
+  left: 2.778%;
+  top: 52.778%;
+}
+
+.velo-loader-wheel-front {
+  left: 62.222%;
+  top: 52.778%;
+}
+
+.velo-loader-body-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- Дорога: серая полоса с бегущей белой прерывистой разметкой. ---- */
 
 .velo-loader-road {
-  stroke: var(--border, #dfe3ec);
-  stroke-width: 3;
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: 87%;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border, #dfe3ec);
 }
 
-.velo-loader-dashes-track rect {
-  fill: var(--text-muted, #9aa2b6);
+.velo-loader-road-dashes {
+  position: absolute;
+  inset: 0;
+  width: 140%;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--text-muted, #9aa2b6) 0 10px,
+    transparent 10px 20px
+  );
+  animation: velo-loader-road-move 0.6s linear infinite;
 }
 
-.velo-loader-frame-line,
-.velo-loader-handlebar {
-  fill: none;
-  stroke: var(--text, #1c2230);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+/* ---- Мягкая эллиптическая тень под колёсами, пульсирует в такт "дыханию". ---- */
+
+.velo-loader-shadow {
+  position: absolute;
+  left: 10%;
+  top: 82%;
+  width: 80%;
+  height: 8%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0) 72%);
+  animation: velo-loader-shadow-pulse 1.1s ease-in-out infinite;
 }
 
-.velo-loader-tire {
-  fill: none;
-  stroke: var(--text, #1c2230);
-  stroke-width: 3;
+/* ---- Линии скорости слева от велосипедиста. ---- */
+
+.velo-loader-speedlines {
+  position: absolute;
+  left: -10%;
+  top: 30%;
+  width: 14%;
+  height: 34%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
-.velo-loader-hub {
-  fill: var(--accent, #3763e8);
+.velo-loader-speedline {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-muted, #9aa2b6);
+  animation: velo-loader-speedline-flicker 0.9s ease-in-out infinite;
 }
 
-.velo-loader-spokes {
-  stroke: var(--accent, #3763e8);
-  stroke-width: 1.4;
+.velo-loader-speedline:nth-child(1) {
+  width: 100%;
+  animation-delay: 0s;
 }
 
-.velo-loader-crank {
-  fill: var(--accent, #3763e8);
+.velo-loader-speedline:nth-child(2) {
+  width: 70%;
+  animation-delay: 0.15s;
+}
+
+.velo-loader-speedline:nth-child(3) {
+  width: 45%;
+  animation-delay: 0.3s;
 }
 
 .velo-loader-text {
@@ -120,7 +202,8 @@
   color: var(--text-muted, #5b6478);
 }
 
-/* Анимации: колёса крутятся, разметка бежит, корпус слегка покачивается */
+/* ---- Анимации ---- */
+
 @keyframes velo-loader-spin {
   to {
     transform: rotate(360deg);
@@ -129,7 +212,7 @@
 
 @keyframes velo-loader-road-move {
   to {
-    transform: translateX(30px);
+    transform: translateX(-20px);
   }
 }
 
@@ -139,28 +222,46 @@
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-3px);
+    transform: translateY(-2px);
   }
 }
 
-.velo-loader-wheel-spin {
-  animation: velo-loader-spin 0.7s linear infinite;
-  transform-origin: 0 0;
+@keyframes velo-loader-shadow-pulse {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleX(0.92);
+    opacity: 0.4;
+  }
 }
 
-.velo-loader-dashes-track {
-  animation: velo-loader-road-move 0.5s linear infinite;
+@keyframes velo-loader-speedline-flicker {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.85;
+  }
 }
 
-.velo-loader-body {
+.velo-loader-bike {
   animation: velo-loader-bob 1.1s ease-in-out infinite;
 }
 
 /* Статичная картинка вместо анимации при prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
-  .velo-loader-wheel-spin,
-  .velo-loader-dashes-track,
-  .velo-loader-body {
+  .velo-loader-wheel,
+  .velo-loader-bike,
+  .velo-loader-road-dashes,
+  .velo-loader-shadow {
     animation: none !important;
+  }
+
+  .velo-loader-speedlines {
+    display: none;
   }
 }
