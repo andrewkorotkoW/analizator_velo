@@ -33,7 +33,10 @@ class Workout:
     elevation_gain_m: Optional[float] = None
     source: str = "csv"
     photo_path: Optional[str] = None
+    gpx_path: Optional[str] = None
     id: Optional[int] = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("gpx_path", None)
+        return data
